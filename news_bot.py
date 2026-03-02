@@ -21,7 +21,7 @@ RSS_FEEDS = [
 FILE_NAME = "posted_links.txt"
 
 
-# ---------- Load Posted Links ----------
+# -------- Load Posted Links --------
 def load_posted_links():
     if not os.path.exists(FILE_NAME):
         return set()
@@ -34,18 +34,36 @@ def save_posted_link(link):
         f.write(link + "\n")
 
 
-# ---------- Clean Summary ----------
-def clean_summary(text):
-    text = BeautifulSoup(text, "html.parser").get_text()
-    text = re.sub(r'\s+', ' ', text).strip()
-    sentences = text.split('. ')
-    text = '. '.join(sentences[:5])  # 4-5 sentences max
-    if len(text) > 900:
-        text = text[:900] + "..."
-    return text
+# -------- Extract Full Article --------
+def extract_full_article(link):
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+        response = requests.get(link, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        paragraphs = soup.find_all("p")
+
+        content = ""
+        for p in paragraphs:
+            text = p.get_text().strip()
+            if len(text) > 40:
+                content += text + " "
+
+        content = re.sub(r'\s+', ' ', content)
+
+        # Keep first 1200 chars
+        content = content[:1200]
+
+        return content
+
+    except Exception as e:
+        print("Article fetch error:", e)
+        return None
 
 
-# ---------- Extract Image ----------
+# -------- Extract Image --------
 def get_image(entry):
     if 'media_content' in entry:
         return entry.media_content[0]['url']
@@ -58,7 +76,7 @@ def get_image(entry):
     return None
 
 
-# ---------- Format Message ----------
+# -------- Format Message --------
 def format_message(title, summary, link, source):
     try:
         hindi_summary = GoogleTranslator(source='auto', target='hi').translate(summary)
@@ -79,7 +97,7 @@ def format_message(title, summary, link, source):
     return message
 
 
-# ---------- Main Bot Logic ----------
+# -------- Main Bot --------
 async def send_news():
     bot = Bot(token=TOKEN)
     posted_links = load_posted_links()
@@ -95,10 +113,15 @@ async def send_news():
                     continue
 
                 title = entry.title
-                summary = entry.summary if 'summary' in entry else "No summary available."
                 source = feed.feed.title if 'title' in feed.feed else "News Source"
 
-                summary = clean_summary(summary)
+                full_content = extract_full_article(link)
+
+                if full_content:
+                    summary = full_content[:900]
+                else:
+                    summary = entry.summary if 'summary' in entry else "No summary available."
+
                 image_url = get_image(entry)
                 message = format_message(title, summary, link, source)
 
@@ -121,10 +144,9 @@ async def send_news():
                 except Exception as e:
                     print("Telegram Error:", e)
 
-        await asyncio.sleep(300)  # 5 minutes
+        await asyncio.sleep(300)
 
 
-# ---------- Start ----------
 async def main():
     await send_news()
 
