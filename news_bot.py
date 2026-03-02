@@ -21,7 +21,8 @@ RSS_FEEDS = [
 FILE_NAME = "posted_links.txt"
 
 
-# -------- Load Posted Links --------
+# ------------------ Duplicate Control ------------------
+
 def load_posted_links():
     if not os.path.exists(FILE_NAME):
         return set()
@@ -34,12 +35,11 @@ def save_posted_link(link):
         f.write(link + "\n")
 
 
-# -------- Extract Full Article --------
+# ------------------ Article Scraper ------------------
+
 def extract_full_article(link):
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
+        headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(link, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
 
@@ -53,17 +53,15 @@ def extract_full_article(link):
 
         content = re.sub(r'\s+', ' ', content)
 
-        # Keep first 1200 chars
-        content = content[:1200]
-
-        return content
+        return content[:1500]
 
     except Exception as e:
         print("Article fetch error:", e)
         return None
 
 
-# -------- Extract Image --------
+# ------------------ Image Extractor ------------------
+
 def get_image(entry):
     if 'media_content' in entry:
         return entry.media_content[0]['url']
@@ -76,14 +74,16 @@ def get_image(entry):
     return None
 
 
-# -------- Format Message --------
-def format_message(title, summary, link, source):
+# ------------------ Message Formatter ------------------
+
+def format_message_parts(title, summary, link, source):
+
     try:
         hindi_summary = GoogleTranslator(source='auto', target='hi').translate(summary)
     except:
         hindi_summary = "हिंदी अनुवाद उपलब्ध नहीं।"
 
-    message = (
+    full_message = (
         f"📰 {title}\n\n"
         f"✍️ {summary}\n\n"
         f"🇮🇳 हिंदी सारांश:\n{hindi_summary}\n\n"
@@ -91,13 +91,16 @@ def format_message(title, summary, link, source):
         f"✅ Verified Source: {source}"
     )
 
-    if len(message) > 1024:
-        message = message[:1000] + "..."
+    if len(full_message) > 1000:
+        part1 = "🔹 PART 1/2\n\n" + full_message[:1000]
+        part2 = "🔹 PART 2/2 (Continuation)\n\n" + full_message[1000:]
+        return part1, part2
+    else:
+        return full_message, None
 
-    return message
 
+# ------------------ Main Bot ------------------
 
-# -------- Main Bot --------
 async def send_news():
     bot = Bot(token=TOKEN)
     posted_links = load_posted_links()
@@ -107,6 +110,7 @@ async def send_news():
             feed = feedparser.parse(feed_url)
 
             for entry in feed.entries[:3]:
+
                 link = entry.link
 
                 if link in posted_links:
@@ -118,24 +122,31 @@ async def send_news():
                 full_content = extract_full_article(link)
 
                 if full_content:
-                    summary = full_content[:900]
+                    summary = full_content[:1200]
                 else:
                     summary = entry.summary if 'summary' in entry else "No summary available."
 
                 image_url = get_image(entry)
-                message = format_message(title, summary, link, source)
+
+                part1, part2 = format_message_parts(title, summary, link, source)
 
                 try:
                     if image_url:
                         await bot.send_photo(
                             chat_id=CHANNEL_ID,
                             photo=image_url,
-                            caption=message
+                            caption=part1
                         )
                     else:
                         await bot.send_message(
                             chat_id=CHANNEL_ID,
-                            text=message
+                            text=part1
+                        )
+
+                    if part2:
+                        await bot.send_message(
+                            chat_id=CHANNEL_ID,
+                            text=part2
                         )
 
                     save_posted_link(link)
